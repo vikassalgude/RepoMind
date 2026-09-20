@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  QUEUED
+  INDEXING
+  READY
+  FAILED
+}
+
+model Repository {
+  id        String      @id @default(uuid())
+  url       String      @unique
+  name      String
+  status    JobStatus   @default(QUEUED)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  
+  chunks    CodeChunk[]
+}
+
+model CodeChunk {
+  id           String     @id @default(uuid())
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  filePath     String
+  startLine    Int
+  endLine      Int
+  qdrantId     String     @unique 
+  
+  @@index([repositoryId])
+}
