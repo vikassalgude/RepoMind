@@ -12,5 +12,5 @@ connection.on('connect',()=>{
     console.log("Connected to UpStash Redis")
 })
 connection.on('error',()=>{
-    console.log("Connection to UpStash Redis failed ")
+    console.error("Connection to UpStash Redis failed ")
 })
