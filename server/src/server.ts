@@ -44,7 +44,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 app.post('/api/repos', async (req: Request, res: Response) => {
   try {
-    const { repoUrl, name } = req.body;
+    const { repoUrl, name, userId } = req.body;
 
     if (!repoUrl || !name) {
       res.status(400).json({
@@ -53,11 +53,23 @@ app.post('/api/repos', async (req: Request, res: Response) => {
       return;
     }
 
+    // Ensure a valid user exists (use provided userId or fallback demo user)
+    let targetUserId = userId;
+    if (!targetUserId) {
+      const demoUser = await prisma.user.upsert({
+        where: { email: 'demo@repomind.local' },
+        update: {},
+        create: { email: 'demo@repomind.local' },
+      });
+      targetUserId = demoUser.id;
+    }
+
     // 1. Create repository in PostgreSQL
-    const repository = await prisma.repository.create({
+    const repository = await prisma.repo.create({
       data: {
-        url: repoUrl,
-        name: name
+        userId: targetUserId,
+        githubUrl: repoUrl,
+        name: name,
       }
     });
 

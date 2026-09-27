@@ -1,38 +1,124 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
 datasource db {
   provider = "postgresql"
 }
 
-enum JobStatus {
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum RepoStatus {
   QUEUED
   INDEXING
+  PARTIALLY_READY
   READY
   FAILED
 }
 
-model Repository {
-  id        String      @id @default(uuid())
-  url       String      @unique
-  name      String
-  status    JobStatus   @default(QUEUED)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+enum Language {
+  // Core Web & Scripting
+  JAVASCRIPT
+  TYPESCRIPT
+  PYTHON
+  RUBY
+  PHP
   
-  chunks    CodeChunk[]
+  // Systems & Enterprise
+  JAVA
+  CPP
+  C
+  CSHARP
+  GO
+  RUST
+  KOTLIN
+  SWIFT
+
+  // Markup, Config & Query
+  SQL
+  HTML
+  CSS
+  JSON
+  MARKDOWN
+  YAML
+
+  UNKNOWN
 }
 
-model CodeChunk {
-  id           String     @id @default(uuid())
-  repositoryId String
-  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  
-  filePath     String
-  startLine    Int
-  endLine      Int
-  qdrantId     String     @unique 
-  
-  @@index([repositoryId])
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  githubToken   String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  repos         Repo[]
+  conversations Conversation[]
+}
+
+model Repo {
+  id               String         @id @default(uuid())
+  userId           String
+  githubUrl        String
+  name             String
+  defaultBranch    String         @default("main")
+  language         Language?      @default(UNKNOWN)
+  status           RepoStatus     @default(QUEUED)
+  chunkCount       Int            @default(0)
+  indexedFileCount Int            @default(0)
+  totalFileCount   Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks           Chunk[]
+  conversations    Conversation[]
+
+  @@unique([userId, githubUrl])
+  @@index([userId])
+}
+
+model Chunk {
+  id        String   @id @default(uuid())
+  repoId    String
+  filePath  String
+  startLine Int
+  endLine   Int
+  language  Language
+  qdrantId  String   @unique
+  createdAt DateTime @default(now())
+
+  repo      Repo     @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([repoId])
+  @@index([repoId, filePath, startLine])
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  userId    String
+  repoId    String
+  title     String?   @default("New Conversation")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repo      Repo      @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([userId, repoId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  citations      Json?
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }
