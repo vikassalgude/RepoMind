@@ -1,4 +1,3 @@
-// server/src/config/qdrant.ts
 import { QdrantClient } from "@qdrant/js-client-rest";
 import dotenv from "dotenv";
 
@@ -15,7 +14,6 @@ export const qdrantClient = new QdrantClient({
 
 export const COLLECTION_NAME = "repomind_chunks";
 
-// Enforce vector dimension alignment before processing any jobs
 export async function initializeQdrant(): Promise<void> {
   try {
     const result = await qdrantClient.collectionExists(COLLECTION_NAME);
@@ -24,16 +22,27 @@ export async function initializeQdrant(): Promise<void> {
       console.log(`[Qdrant] Creating new vector collection: ${COLLECTION_NAME}...`);
       await qdrantClient.createCollection(COLLECTION_NAME, {
         vectors: {
-          size: 768, // Exactly matches gemini-embedding-001 output dimension
+          size: 3072,
           distance: "Cosine",
         },
       });
-      console.log(`[Qdrant] Collection successfully provisioned.`);
+      await qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+        field_name: "repoId",
+        field_schema: "keyword",
+      });
+      console.log(`[Qdrant] Collection successfully provisioned with repoId index.`);
     } else {
+      try {
+        await qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+          field_name: "repoId",
+          field_schema: "keyword",
+        });
+      } catch (err) {
+      }
       console.log(`[Qdrant] Collection '${COLLECTION_NAME}' is ready.`);
     }
   } catch (error) {
-    console.error("❌ Failed to initialize Qdrant:", error);
+    console.error(" Failed to initialize Qdrant:", error);
     throw error;
   }
 }

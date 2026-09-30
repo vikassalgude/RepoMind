@@ -8,6 +8,7 @@ import { generateASTChunks, getLanguageEnum } from '../utils/chunker';
 import { generateEmbedding } from '../config/gemini';
 import { qdrantClient, COLLECTION_NAME } from '../config/qdrant';
 import { withExponentialBackOff } from '../utils/backoff';
+
 export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => {
   const { repoUrl, repoId } = job.data;
   console.log(`[Worker] Started processing: ${repoUrl}`);
@@ -18,16 +19,17 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
       data: { status: 'INDEXING' }
     });
 
-    // 1. Extract GitHub Metadata
     const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
     if (!match) throw new Error("Invalid GitHub URL");
     const owner = match[1];
     const repoName = match[2].replace(/\.git$/, '');
 
-    const githubHeaders = {
+    const githubHeaders: Record<string, string> = {
       'User-Agent': 'RepoMind-App',
-      ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {})
     };
+    if (process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN.trim() !== '') {
+      githubHeaders['Authorization'] = `token ${process.env.GITHUB_TOKEN.trim()}`;
+    }
 
     const repoInfo = await axios.get(`https://api.github.com/repos/${owner}/${repoName}`, {
       headers: githubHeaders
@@ -41,7 +43,6 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
     
     if (!treeResponse.data.tree) throw new Error("Failed to fetch repository tree");
 
-    // 2. Filter Edge Files
     const isProcessableFile = (path: string) => {
       const invalidExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.mp4', '.pdf', '.woff', '.ttf', '.eot', '.ico'];
       const invalidFiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
@@ -63,15 +64,24 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
     let totalChunks = 0;
     let indexedFiles = 0;
 
-    // 3. The Extraction & Parsing Loop
     for (const file of processableFiles) {
       try {
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${defaultBranch}/${file.path}`;
-        const fileResponse = await axios.get(rawUrl, {
-          responseType: 'text',
-          headers: githubHeaders
-        });
-        const code = fileResponse.data;
+        let code: string;
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${defaultBranch}/${file.path}`;
+          const fileResponse = await axios.get(rawUrl, { responseType: 'text' });
+          code = fileResponse.data;
+        } catch (rawErr) {
+          const apiUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/${file.path}?ref=${defaultBranch}`;
+          const fileResponse = await axios.get(apiUrl, {
+            responseType: 'text',
+            headers: {
+              ...githubHeaders,
+              Accept: 'application/vnd.github.v3.raw'
+            }
+          });
+          code = fileResponse.data;
+        }
 
         if (typeof code !== 'string') continue;
 
@@ -83,16 +93,11 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
         const qdrantPoints = [];
         const prismaChunks = [];
 
-        // 4. Vector Generation
         for (const chunk of chunks) {
-          // const vector = await generateEmbedding(chunk.content);
           const vector = await withExponentialBackOff(() => generateEmbedding(chunk.content));
 
-          
-          // Qdrant strictly requires either a uint64 or a valid UUID string for the point ID.
           const qdrantId = crypto.randomUUID(); 
 
-          // Build the Qdrant Payload
           qdrantPoints.push({
             id: qdrantId,
             vector: vector,
@@ -105,26 +110,23 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
             }
           });
 
-          // Build the PostgreSQL Record
           prismaChunks.push({
             repoId: repoId,
             filePath: file.path,
             startLine: chunk.startLine,
             endLine: chunk.endLine,
-            language: langString as Language, // Cast to strict Prisma Enum
+            language: langString as Language,
+            content: chunk.content, 
             qdrantId: qdrantId
           });
         }
 
-        // 5. The Dual-Write Transaction
         if (qdrantPoints.length > 0) {
-          // Push arrays of points to Qdrant Cloud via the REST client
           await qdrantClient.upsert(COLLECTION_NAME, {
             wait: true, 
             points: qdrantPoints
           });
 
-          // Push metadata to Supabase
           await prisma.chunk.createMany({
             data: prismaChunks
           });
@@ -134,7 +136,6 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
 
         indexedFiles++;
 
-        // Batch update progress to UI every 5 files to prevent DB bottlenecking
         if (indexedFiles % 5 === 0) {
           await prisma.repo.update({
             where: { id: repoId },
@@ -148,7 +149,6 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
       }
     }
 
-    // 6. Mark Job Ready
     await prisma.repo.update({
       where: { id: repoId },
       data: { status: 'READY', indexedFileCount: indexedFiles, chunkCount: totalChunks }
@@ -163,4 +163,5 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
     });
     throw error;
   }
+  
 }, { connection });
