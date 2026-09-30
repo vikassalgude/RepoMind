@@ -1,7 +1,4 @@
-// server/src/utils/chunker.ts
-// import Parser from 'web-tree-sitter';
-import { Parser, Language, Node } from 'web-tree-sitter';
-
+import Parser from 'web-tree-sitter';
 import path from 'path';
 import fs from 'fs';
 
@@ -11,7 +8,6 @@ export interface CodeChunk {
   endLine: number;
 }
 
-// 1. Map file extensions to your Prisma Enums
 export function getLanguageEnum(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase();
   switch (ext) {
@@ -38,7 +34,6 @@ export function getLanguageEnum(filePath: string): string {
   }
 }
 
-// 2. Map Prisma Enums to Tree-sitter WASM binaries
 function getWasmPath(languageEnum: string): string | null {
   const langMap: Record<string, string> = {
     'JAVASCRIPT': 'javascript',
@@ -61,11 +56,9 @@ function getWasmPath(languageEnum: string): string | null {
   const wasmName = langMap[languageEnum];
   if (!wasmName) return null;
 
-  // Resolves the WebAssembly binary from the package we just installed
   return path.join(process.cwd(), 'node_modules', 'tree-sitter-wasms', 'out', `tree-sitter-${wasmName}.wasm`);
 }
 
-// 3. Fallback chunker for unsupported languages (Splits by 50 lines)
 function naiveChunking(code: string): CodeChunk[] {
   const lines = code.split('\n');
   const chunks: CodeChunk[] = [];
@@ -82,11 +75,9 @@ function naiveChunking(code: string): CodeChunk[] {
   return chunks;
 }
 
-// 4. The AST Chunker Engine
 export async function generateASTChunks(code: string, languageEnum: string): Promise<CodeChunk[]> {
   const wasmPath = getWasmPath(languageEnum);
   
-  // Graceful fallback if language is UNKNOWN or WASM is missing
   if (!wasmPath || !fs.existsSync(wasmPath)) {
     return naiveChunking(code);
   }
@@ -95,7 +86,7 @@ export async function generateASTChunks(code: string, languageEnum: string): Pro
   const parser = new Parser();
   
   try {
-    const lang = await Language.load(wasmPath);
+    const lang = await Parser.Language.load(wasmPath);
     parser.setLanguage(lang);
   } catch (error) {
     console.warn(`[Chunker] Failed to load WASM for ${languageEnum}. Falling back to naive chunking.`);
@@ -109,28 +100,26 @@ export async function generateASTChunks(code: string, languageEnum: string): Pro
 
   const chunks: CodeChunk[] = [];
 
-  // AST Nodes we want to extract as independent semantic blocks
   const targetNodes = [
     'function_declaration', 'function_definition', 'method_definition', 
     'class_declaration', 'class_definition', 'impl_item', 
     'interface_declaration', 'type_alias_declaration'
   ];
 
-   function walk(node: Node) {
-  if (targetNodes.includes(node.type) && node.text.length > 30) {
-    chunks.push({
-      content: node.text,
-      startLine: node.startPosition.row + 1, 
-      endLine: node.endPosition.row + 1
-    });
-  }
-  for (const child of node.children) {
-    walk(child);
-  }
+  function walk(node: Parser.SyntaxNode) {
+    if (targetNodes.includes(node.type) && node.text.length > 30) {
+      chunks.push({
+        content: node.text,
+        startLine: node.startPosition.row + 1, 
+        endLine: node.endPosition.row + 1
+      });
+    }
+    for (const child of node.children) {
+      walk(child);
+    }
   }
 
   walk(tree.rootNode);
 
-  // If a file is just a script with no functions/classes, it returns empty. Fallback to naive line splitting.
   return chunks.length > 0 ? chunks : naiveChunking(code);
 }

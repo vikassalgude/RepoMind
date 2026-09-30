@@ -1,10 +1,11 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-//import {v4 as uuidv4} from 'uuid'
 import { addRepoToQueue } from './queues/ingestionQueue';
 import { prisma } from './db/prisma';
-//import { ingestionWorker } from './workers/ingestionWorker';
+import { chatRouter } from './routes/chat';
+import { initializeQdrant } from './config/qdrant';
+
 dotenv.config();
 
 const app = express();
@@ -17,31 +18,6 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// app.post('/api/repos', async (req: Request, res: Response) => {
-//   try {
-//     const { repoUrl } = req.body;
-    
-//     if (!repoUrl) {
-//        res.status(400).json({ error: "repoUrl is required" });
-//        return;
-//     }
-
-//     // const mockRepoId = uuidv4(); 
-    
-//     await addRepoToQueue(repoUrl, mockRepoId);
-
-//     // Respond immediately so the user isn't kept waiting
-//     res.status(202).json({ 
-//       message: "Repository queued for processing", 
-//       repoId: mockRepoId 
-//     });
-
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ error: "Internal Server Error" });
-//   }
-// });
-
 app.post('/api/repos', async (req: Request, res: Response) => {
   try {
     const { repoUrl, name, userId } = req.body;
@@ -53,7 +29,6 @@ app.post('/api/repos', async (req: Request, res: Response) => {
       return;
     }
 
-    // Ensure a valid user exists (use provided userId or fallback demo user)
     let targetUserId = userId;
     if (!targetUserId) {
       const demoUser = await prisma.user.upsert({
@@ -64,7 +39,6 @@ app.post('/api/repos', async (req: Request, res: Response) => {
       targetUserId = demoUser.id;
     }
 
-    // 1. Create repository in PostgreSQL
     const repository = await prisma.repo.create({
       data: {
         userId: targetUserId,
@@ -73,13 +47,11 @@ app.post('/api/repos', async (req: Request, res: Response) => {
       }
     });
 
-    // 2. Add the real database ID to BullMQ
     await addRepoToQueue(
       repoUrl,
       repository.id
     );
 
-    // 3. Respond immediately
     res.status(202).json({
       message: 'Repository queued for processing',
       repoId: repository.id
@@ -94,6 +66,15 @@ app.post('/api/repos', async (req: Request, res: Response) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.use('/api/chat', chatRouter);
+
+initializeQdrant()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to initialize Qdrant before starting server:', err);
+    process.exit(1);
+  });

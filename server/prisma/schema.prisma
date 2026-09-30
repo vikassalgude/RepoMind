@@ -88,6 +88,7 @@ model Chunk {
   startLine Int
   endLine   Int
   language  Language
+  content String
   qdrantId  String   @unique
   createdAt DateTime @default(now())
 
