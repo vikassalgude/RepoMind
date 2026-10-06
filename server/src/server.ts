@@ -66,6 +66,82 @@ app.post('/api/repos', async (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/repos', async (req: Request, res: Response) => {
+  try {
+    const repos = await prisma.repo.findMany({
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        _count: {
+          select: { chunks: true }
+        }
+      }
+    });
+
+    const formatted = repos.map((repo) => ({
+      id: repo.id,
+      name: repo.name,
+      githubUrl: repo.githubUrl,
+      branch: repo.defaultBranch || 'main',
+      status: repo.status,
+      chunkCount: repo.chunkCount || repo._count.chunks || 0,
+      indexedFileCount: repo.indexedFileCount,
+      totalFileCount: repo.totalFileCount,
+      updatedAt: repo.updatedAt
+    }));
+
+    res.status(200).json(formatted);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch repositories' });
+  }
+});
+
+app.get('/api/repos/:id', async (req: Request, res: Response) => {
+  try {
+    const targetId = req.params.id as string;
+    const repo = await prisma.repo.findUnique({
+      where: { id: targetId },
+      include: {
+        chunks: {
+          select: {
+            id: true,
+            filePath: true,
+            startLine: true,
+            endLine: true,
+            language: true,
+            content: true
+          },
+          orderBy: { filePath: 'asc' }
+        },
+        _count: {
+          select: { chunks: true }
+        }
+      }
+    }) as any;
+
+    if (!repo) {
+      res.status(404).json({ error: 'Repository not found' });
+      return;
+    }
+
+    res.status(200).json({
+      id: repo.id,
+      name: repo.name,
+      githubUrl: repo.githubUrl,
+      branch: repo.defaultBranch || 'main',
+      status: repo.status,
+      chunkCount: repo.chunkCount || repo._count?.chunks || 0,
+      indexedFileCount: repo.indexedFileCount,
+      totalFileCount: repo.totalFileCount,
+      updatedAt: repo.updatedAt,
+      chunks: repo.chunks || []
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch repository status' });
+  }
+});
+
 app.use('/api/chat', chatRouter);
 
 initializeQdrant()

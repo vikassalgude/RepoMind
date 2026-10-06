@@ -1,18 +1,18 @@
-import { useState } from 'react'
-import './App.css'
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { LandingView } from './pages/LandingView';
+import { DashboardView } from './pages/DashboardView';
+import { ChatView } from './pages/ChatView';
 
-function App() {
-  const [count, setCount] = useState(0)
-
+export default function App() {
   return (
-    <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>RepoMind - React App</h1>
-      <p>Welcome to RepoMind Client (React JS)</p>
-      <button onClick={() => setCount((count) => count + 1)}>
-        Count is {count}
-      </button>
-    </div>
-  )
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingView />} />
+        <Route path="/dashboard" element={<DashboardView />} />
+        <Route path="/chat/:repoId" element={<ChatView />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
-
-export default App

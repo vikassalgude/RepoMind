@@ -1,5 +1,10 @@
 node_modules/
 .env
+.env.*
 dist/
 build/
 .DS_Store
+DESIGN.md
+ARCHITECTURE.md
+FRONTEND_ARCHITECTURE.md
+*.md
