@@ -3,7 +3,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { connection } from '../config/redis';
 import { prisma } from '../db/prisma';
-import { Language } from '@prisma/client';
+import { Language, RepoStatus } from '@prisma/client';
 import { generateASTChunks, getLanguageEnum } from '../utils/chunker';
 import { generateEmbedding } from '../config/gemini';
 import { qdrantClient, COLLECTION_NAME } from '../config/qdrant';
@@ -16,7 +16,7 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
   try {
     await prisma.repo.update({
       where: { id: repoId },
-      data: { status: 'INDEXING' }
+      data: { status: RepoStatus.INDEXING }
     });
 
     const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
@@ -24,11 +24,23 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
     const owner = match[1];
     const repoName = match[2].replace(/\.git$/, '');
 
+    // Retrieve repo record with user OAuth token if available
+    const repoRecord = await prisma.repo.findUnique({
+      where: { id: repoId },
+      include: { user: true }
+    });
+
+    const userToken =
+      repoRecord?.user?.githubToken ||
+      (process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN.trim() !== ''
+        ? process.env.GITHUB_TOKEN.trim()
+        : null);
+
     const githubHeaders: Record<string, string> = {
       'User-Agent': 'RepoMind-App',
     };
-    if (process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN.trim() !== '') {
-      githubHeaders['Authorization'] = `token ${process.env.GITHUB_TOKEN.trim()}`;
+    if (userToken) {
+      githubHeaders['Authorization'] = `Bearer ${userToken}`;
     }
 
     const repoInfo = await axios.get(`https://api.github.com/repos/${owner}/${repoName}`, {
@@ -67,23 +79,38 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
     for (const file of processableFiles) {
       try {
         let code: string;
-        try {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${defaultBranch}/${file.path}`;
-          const fileResponse = await axios.get(rawUrl, { responseType: 'text' });
+        const apiUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/${file.path}?ref=${defaultBranch}`;
+        const fileResponse = await axios.get(apiUrl, {
+          responseType: 'text',
+          headers: {
+            ...githubHeaders,
+            Accept: 'application/vnd.github.v3.raw'
+          }
+        });
+
+        if (typeof fileResponse.data === 'string') {
           code = fileResponse.data;
-        } catch (rawErr) {
-          const apiUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/${file.path}?ref=${defaultBranch}`;
-          const fileResponse = await axios.get(apiUrl, {
-            responseType: 'text',
-            headers: {
-              ...githubHeaders,
-              Accept: 'application/vnd.github.v3.raw'
-            }
-          });
-          code = fileResponse.data;
+        } else if (fileResponse.data && typeof fileResponse.data === 'object') {
+          if (fileResponse.data.content) {
+            code = Buffer.from(fileResponse.data.content, 'base64').toString('utf-8');
+          } else {
+            code = JSON.stringify(fileResponse.data);
+          }
+        } else {
+          code = String(fileResponse.data || '');
         }
 
-        if (typeof code !== 'string') continue;
+        // If returned as raw JSON string with content field
+        if (typeof code === 'string' && code.startsWith('{') && code.includes('"content":')) {
+          try {
+            const parsed = JSON.parse(code);
+            if (parsed.content) {
+              code = Buffer.from(parsed.content, 'base64').toString('utf-8');
+            }
+          } catch {}
+        }
+
+        if (typeof code !== 'string' || !code.trim()) continue;
 
         const langString = getLanguageEnum(file.path);
         const chunks = await generateASTChunks(code, langString);
@@ -94,6 +121,8 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
         const prismaChunks = [];
 
         for (const chunk of chunks) {
+          if (!chunk.content || !chunk.content.trim()) continue;
+
           const vector = await withExponentialBackOff(() => generateEmbedding(chunk.content));
 
           const qdrantId = crypto.randomUUID(); 
@@ -151,17 +180,18 @@ export const ingestionWorker = new Worker('repo-ingestion', async (job: Job) => 
 
     await prisma.repo.update({
       where: { id: repoId },
-      data: { status: 'READY', indexedFileCount: indexedFiles, chunkCount: totalChunks }
+      data: { status: RepoStatus.READY, indexedFileCount: indexedFiles, chunkCount: totalChunks }
     });
     console.log(`[Worker] Successfully completed: ${repoUrl}. Total Chunks: ${totalChunks}`);
 
   } catch (error: any) {
-    console.error(`[Worker] Job failed:`, error.message);
+    const errorDetails = error.response?.data?.message || error.message || 'Unknown ingestion error';
+    console.error(`[Worker] Job failed: ${errorDetails}`, error.response?.data || error.message);
     await prisma.repo.update({
       where: { id: repoId },
-      data: { status: 'FAILED' }
+      data: { status: RepoStatus.FAILED }
     });
-    throw error;
+    throw new Error(errorDetails);
   }
   
 }, { connection });

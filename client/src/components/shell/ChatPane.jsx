@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import mermaid from 'mermaid';
-import { MessageSquare, Sparkles, ArrowUp, FileCode, CornerDownLeft } from 'lucide-react';
+import { MessageSquare, Sparkles, ArrowUp, FileCode, CornerDownLeft, AlertCircle, ArrowLeft } from 'lucide-react';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -136,8 +137,18 @@ function MermaidDiagram({ chart }) {
   );
 }
 
-export function ChatPane({ messages = [], isStreaming, onSelectCitation, onSendMessage }) {
+export function ChatPane({
+  messages = [],
+  isStreaming,
+  loadingHistory = false,
+  repoName = '',
+  repoStatus = '',
+  onSelectCitation,
+  onSendMessage
+}) {
+  const navigate = useNavigate();
   const [inputQuery, setInputQuery] = useState('');
+  const isFailed = repoStatus === 'FAILED' || repoStatus === 'Failed';
 
   const handleSubmit = (e) => {
     e?.preventDefault();
@@ -210,7 +221,93 @@ export function ChatPane({ messages = [], isStreaming, onSelectCitation, onSendM
 
       {/* Chat Messages Stream Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 select-text">
-        {messages.map((msg) => (
+        {/* Indexing Failed Warning Banner */}
+        {isFailed && (
+          <div className="w-full p-4 bg-rose-950/40 border border-rose-800/50 rounded-2xl text-rose-200">
+            <div className="flex items-start gap-3">
+              <AlertCircle size={18} className="text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-1.5 flex-1">
+                <h4 className="text-xs font-semibold text-rose-200 uppercase tracking-wider font-mono">
+                  Repository Indexing Failed
+                </h4>
+                <p className="text-xs text-rose-300/80 leading-relaxed font-['Inter']">
+                  We were unable to complete indexing for this repository. Return to the dashboard to retry indexing.
+                </p>
+                <div className="pt-2">
+                  <button
+                    onClick={() => navigate('/dashboard')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800/80 border border-rose-700/60 text-white rounded-xl text-xs font-medium transition-colors"
+                  >
+                    <ArrowLeft size={13} />
+                    <span>Back to Dashboard</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {loadingHistory ? (
+          /* Subtle Pulse / Skeleton Loader while conversation messages hydrate */
+          <div className="h-full flex flex-col justify-center max-w-md mx-auto space-y-5 animate-pulse p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#222222]" />
+              <div className="space-y-2 flex-1">
+                <div className="h-3.5 bg-[#222222] rounded w-2/5" />
+                <div className="h-2.5 bg-[#1a1a1a] rounded w-3/5" />
+              </div>
+            </div>
+            <div className="space-y-3 pt-2">
+              <div className="h-3.5 bg-[#1c1c1c] rounded w-full" />
+              <div className="h-3.5 bg-[#1c1c1c] rounded w-11/12" />
+              <div className="h-3.5 bg-[#1c1c1c] rounded w-4/5" />
+            </div>
+            <div className="pt-4 space-y-2.5">
+              <div className="h-10 bg-[#191919] rounded-xl w-full" />
+              <div className="h-10 bg-[#191919] rounded-xl w-5/6" />
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
+          /* Clean Developer Greeting & Empty State with Suggestion Pills */
+          <div className="h-full flex flex-col items-center justify-center max-w-lg mx-auto text-center px-4 py-8">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 mb-4 shadow-lg shadow-sky-500/5">
+              <Sparkles size={22} />
+            </div>
+
+            <h2 className="text-lg md:text-xl font-bold text-white tracking-tight font-['Hanken_Grotesk']">
+              Chat with {repoName || 'Repository'}
+            </h2>
+
+            <p className="text-xs md:text-sm text-[#8e9192] mt-1.5 max-w-sm font-['Inter'] leading-relaxed">
+              Ask questions, explore architecture, or trace data flows.
+            </p>
+
+            <div className="mt-8 w-full flex flex-col gap-2.5">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-[#737373] text-left px-1">
+                Suggested prompts
+              </span>
+              {[
+                'Explain the high-level architecture',
+                'Trace the main API routes',
+                'What are the core dependencies?'
+              ].map((pillText, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setInputQuery(pillText)}
+                  className="w-full text-left p-3 rounded-xl bg-[#1c1b1b] hover:bg-[#252525] border border-[#333333] hover:border-[#4f4f4f] text-xs text-[#d4d4d4] hover:text-white transition-all flex items-center justify-between group"
+                >
+                  <span className="truncate">{pillText}</span>
+                  <CornerDownLeft
+                    size={13}
+                    className="text-[#737373] group-hover:text-white shrink-0 ml-2 transition-colors"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          messages.map((msg) => (
           <React.Fragment key={msg.id}>
             {/* User Message Bubble */}
             {msg.sender === 'user' && (
@@ -351,7 +448,7 @@ export function ChatPane({ messages = [], isStreaming, onSelectCitation, onSendM
               </div>
             )}
           </React.Fragment>
-        ))}
+        )))}
       </div>
 
       {/* Sticky Query Input Box */}

@@ -60,17 +60,21 @@ function getWasmPath(languageEnum: string): string | null {
 }
 
 function naiveChunking(code: string): CodeChunk[] {
+  if (!code || !code.trim()) return [];
   const lines = code.split('\n');
   const chunks: CodeChunk[] = [];
   const chunkSize = 50;
 
   for (let i = 0; i < lines.length; i += chunkSize) {
     const chunkLines = lines.slice(i, i + chunkSize);
-    chunks.push({
-      content: chunkLines.join('\n'),
-      startLine: i + 1,
-      endLine: i + chunkLines.length
-    });
+    const content = chunkLines.join('\n');
+    if (content.trim().length > 0) {
+      chunks.push({
+        content,
+        startLine: i + 1,
+        endLine: i + chunkLines.length
+      });
+    }
   }
   return chunks;
 }

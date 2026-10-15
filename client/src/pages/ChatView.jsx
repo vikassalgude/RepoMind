@@ -5,8 +5,8 @@ import { Header } from '../components/shell/Header';
 import { Sidebar } from '../components/shell/Sidebar';
 import { ChatPane } from '../components/shell/ChatPane';
 import { CodePane } from '../components/shell/CodePane';
-import { MOCK_FILES } from '../data/mockData';
-import { streamChatResponse, fetchRepoStatus } from '../services/api';
+import { RefreshCw } from 'lucide-react';
+import { streamChatResponse, fetchRepoStatus, fetchConversationMessages, fetchCurrentUser } from '../services/api';
 
 const ResizeHandle = () => (
   <Separator className="w-2 relative group cursor-col-resize shrink-0 focus:outline-none">
@@ -91,13 +91,51 @@ export function ChatView() {
   const [highlightLines, setHighlightLines] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(true);
 
-  // Fetch Repository Data & Reset State on repoId change
+  useEffect(() => {
+    let isMounted = true;
+    fetchCurrentUser()
+      .then((data) => {
+        if (isMounted) {
+          if (!data || !data.user) {
+            navigate('/');
+            return;
+          }
+          setLoadingAuth(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          navigate('/');
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
+
   useEffect(() => {
     setMessages([]);
     setHighlightLines(null);
+    setLoadingHistory(true);
 
     if (repoId) {
+      fetchConversationMessages(repoId)
+        .then((history) => {
+          if (history && history.messages) {
+            setMessages(history.messages);
+          }
+        })
+        .catch((err) => {
+          console.warn('[ChatView] History hydration fallback:', err.message);
+        })
+        .finally(() => {
+          setLoadingHistory(false);
+        });
+
       fetchRepoStatus(repoId)
         .then((data) => {
           setCurrentRepo({
@@ -105,7 +143,7 @@ export function ChatView() {
             name: data.name,
             branch: data.branch || 'main',
             chunkCount: data.chunkCount || 0,
-            status: data.status === 'READY' ? 'Ready' : data.status
+            status: data.status
           });
 
           if (data.chunks && data.chunks.length > 0) {
@@ -132,19 +170,16 @@ export function ChatView() {
     }
   }, [repoId]);
 
-  // File Selection Handler (Sidebar -> CodePane)
   const handleSelectFile = (path) => {
     setSelectedFilePath(path);
     setHighlightLines(null);
   };
 
-  // Citation Click Handler (ChatPane -> CodePane)
   const handleSelectCitation = (path, startLine, endLine) => {
     setSelectedFilePath(path);
     setHighlightLines({ start: startLine, end: endLine });
   };
 
-  // Chat Submission & Live SSE Streaming Handler
   const handleSendMessage = async (text) => {
     const userMsg = {
       id: `msg-${Date.now()}`,
@@ -206,16 +241,24 @@ export function ChatView() {
           )
         );
         setIsStreaming(false);
+        if (repoId) {
+          fetchConversationMessages(repoId)
+            .then((history) => {
+              if (history && history.messages) {
+                setMessages(history.messages);
+              }
+            })
+            .catch(() => {});
+        }
       }
     });
   };
 
-  // Resolve current active file: DB chunks -> Mock fallback
   const dbFileObj = dbChunksMap[selectedFilePath] 
     ? buildFileFromChunks(selectedFilePath, dbChunksMap[selectedFilePath])
     : null;
 
-  const currentFile = dbFileObj || MOCK_FILES[selectedFilePath] || {
+  const currentFile = dbFileObj || {
     path: selectedFilePath,
     name: selectedFilePath.split('/').pop(),
     language: 'TypeScript',
@@ -225,6 +268,17 @@ export function ChatView() {
       { num: 2, text: `export function inspect() { console.log("Inspecting ${selectedFilePath}"); }`, type: 'function' }
     ]
   };
+
+  if (loadingAuth) {
+    return (
+      <div className="h-screen bg-[#131313] flex items-center justify-center font-['Inter']">
+        <div className="flex items-center gap-3 text-xs font-mono text-[#8e9192]">
+          <RefreshCw size={16} className="animate-spin text-white" />
+          <span>Verifying session...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#131313] text-[#e5e2e1] overflow-hidden font-['Inter']">
@@ -273,6 +327,9 @@ export function ChatView() {
               <ChatPane 
                 messages={messages}
                 isStreaming={isStreaming}
+                loadingHistory={loadingHistory}
+                repoName={currentRepo.name}
+                repoStatus={currentRepo.status}
                 onSelectCitation={handleSelectCitation}
                 onSendMessage={handleSendMessage}
               />

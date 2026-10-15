@@ -38,7 +38,6 @@ export function CodePane({ currentFile, highlightLines }) {
   const decorationsRef = useRef([]);
   const [copied, setCopied] = useState(false);
 
-  // Derive plain code text string from currentFile
   const codeText = currentFile?.lines
     ? currentFile.lines.map((l) => l.text).join('\n')
     : currentFile?.content || '// No code content available';
@@ -46,14 +45,12 @@ export function CodePane({ currentFile, highlightLines }) {
   const language = getLanguageFromPath(currentFile?.path);
   const breadcrumbs = (currentFile?.path || 'server/src/utils/chunker.ts').split('/');
 
-  // Monaco Editor mount handler
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     applyCitationHighlight(editor, monaco, highlightLines);
   };
 
-  // Re-apply citation line highlights & scroll whenever highlightLines or file changes
   useEffect(() => {
     if (editorRef.current && monacoRef.current) {
       applyCitationHighlight(editorRef.current, monacoRef.current, highlightLines);
@@ -79,11 +76,9 @@ export function CodePane({ currentFile, highlightLines }) {
       }
     ]);
 
-    // Smooth scroll target line into center of editor viewport
     editor.revealLineInCenter(start, 1);
   }
 
-  // Copy code handler
   const handleCopyCode = () => {
     if (!codeText) return;
     navigator.clipboard.writeText(codeText);

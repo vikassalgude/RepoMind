@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Terminal, GitBranch, ArrowLeft } from 'lucide-react';
 
 export function Header({ currentRepo, activeView, onNavigate }) {
@@ -6,9 +7,10 @@ export function Header({ currentRepo, activeView, onNavigate }) {
     <header className="flex justify-between items-center h-14 px-4 w-full border-b border-[#444748] bg-[#131313] z-20 shrink-0 select-none">
       <div className="flex items-center gap-5">
         {/* Brand Logo */}
-        <div 
-          className="flex items-center gap-2 cursor-pointer"
-          onClick={() => onNavigate && onNavigate('dashboard')}
+        <Link 
+          to="/"
+          className="flex items-center gap-2 cursor-pointer hover:opacity-90 transition-opacity"
+          title="Go to RepoMind Home"
         >
           <div className="w-7 h-7 bg-white rounded flex items-center justify-center text-[#131313]">
             <Terminal size={18} className="stroke-[2.5]" />
@@ -16,7 +18,7 @@ export function Header({ currentRepo, activeView, onNavigate }) {
           <span className="font-['Hanken_Grotesk'] text-lg font-bold text-white tracking-tight">
             RepoMind
           </span>
-        </div>
+        </Link>
 
         <div className="h-4 w-[1px] bg-[#444748]" />
 
