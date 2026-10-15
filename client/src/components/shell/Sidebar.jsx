@@ -118,7 +118,6 @@ function FileTreeNode({ node, selectedFilePath, onSelectFile, depth = 0 }) {
     );
   }
 
-  // File Leaf Node
   const isSelected = selectedFilePath === node.fullPath;
   return (
     <div
@@ -145,10 +144,8 @@ function FileTreeNode({ node, selectedFilePath, onSelectFile, depth = 0 }) {
 export function Sidebar({ selectedFilePath, onSelectFile, dynamicFiles = [], repoBranch = 'main', chunkCount = 55 }) {
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Use dynamic files from backend if present, else fallback demo paths
   const activeFilePaths = dynamicFiles.length > 0 ? dynamicFiles : DEFAULT_FALLBACK_PATHS;
 
-  // Filter paths by search input
   const filteredPaths = useMemo(() => {
     if (!searchTerm.trim()) return activeFilePaths;
     return activeFilePaths.filter(path => 
@@ -156,7 +153,6 @@ export function Sidebar({ selectedFilePath, onSelectFile, dynamicFiles = [], rep
     );
   }, [activeFilePaths, searchTerm]);
 
-  // Convert flat paths into nested tree hierarchy
   const treeData = useMemo(() => {
     return buildNestedTree(filteredPaths);
   }, [filteredPaths]);

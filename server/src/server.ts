@@ -1,26 +1,42 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import { addRepoToQueue } from './queues/ingestionQueue';
 import { prisma } from './db/prisma';
+import { authRouter } from './routes/auth';
+import { userRouter } from './routes/user';
 import { chatRouter } from './routes/chat';
 import { initializeQdrant } from './config/qdrant';
+import { requireAuth, AuthenticatedRequest } from './middleware/auth';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const CLIENT_URL = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
 
-app.use(cors());
+app.use(
+  cors({
+    origin: CLIENT_URL,
+    credentials: true
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
 
-app.get('/api/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+// Health check endpoint for uptime monitoring
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
 });
 
-app.post('/api/repos', async (req: Request, res: Response) => {
+app.use('/api/auth', authRouter);
+app.use('/api/user', userRouter);
+
+// POST /api/repos
+app.post('/api/repos', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { repoUrl, name, userId } = req.body;
+    const { repoUrl, name } = req.body;
 
     if (!repoUrl || !name) {
       res.status(400).json({
@@ -29,14 +45,31 @@ app.post('/api/repos', async (req: Request, res: Response) => {
       return;
     }
 
-    let targetUserId = userId;
+    const targetUserId = req.userId;
     if (!targetUserId) {
-      const demoUser = await prisma.user.upsert({
-        where: { email: 'demo@repomind.local' },
-        update: {},
-        create: { email: 'demo@repomind.local' },
+      res.status(401).json({ error: 'Authentication required. Please sign in with your GitHub account.' });
+      return;
+    }
+
+    // Check if repo is already registered for this user
+    let existingRepo = await prisma.repo.findFirst({
+      where: { userId: targetUserId, githubUrl: repoUrl }
+    });
+
+    if (existingRepo) {
+      if (existingRepo.status === 'FAILED') {
+        await prisma.repo.update({
+          where: { id: existingRepo.id },
+          data: { status: 'QUEUED' }
+        });
+        await addRepoToQueue(repoUrl, existingRepo.id);
+      }
+      res.status(200).json({
+        message: 'Repository already queued or indexed',
+        repoId: existingRepo.id,
+        status: existingRepo.status === 'FAILED' ? 'QUEUED' : existingRepo.status
       });
-      targetUserId = demoUser.id;
+      return;
     }
 
     const repository = await prisma.repo.create({
@@ -44,28 +77,26 @@ app.post('/api/repos', async (req: Request, res: Response) => {
         userId: targetUserId,
         githubUrl: repoUrl,
         name: name,
+        status: 'QUEUED'
       }
     });
 
-    await addRepoToQueue(
-      repoUrl,
-      repository.id
-    );
+    await addRepoToQueue(repoUrl, repository.id);
 
     res.status(202).json({
       message: 'Repository queued for processing',
       repoId: repository.id
     });
 
-  } catch (error) {
-    console.error(error);
-
+  } catch (error: any) {
+    console.error('[Repo Ingestion Error]:', error);
     res.status(500).json({
-      error: 'Internal Server Error'
+      error: error.message || 'Internal Server Error'
     });
   }
 });
 
+// GET /api/repos (Public list)
 app.get('/api/repos', async (req: Request, res: Response) => {
   try {
     const repos = await prisma.repo.findMany({
@@ -96,6 +127,7 @@ app.get('/api/repos', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/repos/:id (Single repository status & code chunks)
 app.get('/api/repos/:id', async (req: Request, res: Response) => {
   try {
     const targetId = req.params.id as string;
@@ -142,8 +174,10 @@ app.get('/api/repos/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Chat routes
 app.use('/api/chat', chatRouter);
 
+// Initialize Qdrant and start server
 initializeQdrant()
   .then(() => {
     app.listen(PORT, () => {

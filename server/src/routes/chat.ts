@@ -1,8 +1,10 @@
-import express, { Request, Response } from 'express';
+import express, { Response } from 'express';
 import OpenAI from 'openai';
 import { prisma } from '../db/prisma';
+import { MessageRole } from '@prisma/client';
 import { generateEmbedding } from '../config/gemini';
 import { qdrantClient, COLLECTION_NAME } from '../config/qdrant';
+import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 
 export const chatRouter = express.Router();
 
@@ -11,24 +13,68 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
-interface ChatMessage {
-  sender?: 'user' | 'ai' | 'assistant';
-  role?: 'user' | 'assistant' | 'system';
-  text?: string;
-  content?: string;
-}
-
 interface ChatRequest {
   repoId: string;
   query: string;
-  messages?: ChatMessage[];
 }
+
+/**
+ * GET /api/chat/:repoId/messages
+ * Protected route returning all saved messages for a repository conversation.
+ */
+chatRouter.get('/:repoId/messages', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const repoId = req.params.repoId as string;
+
+    // Find or create conversation for (userId, repoId)
+    let conversation = (await prisma.conversation.findFirst({
+      where: { userId, repoId },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' }
+        }
+      }
+    })) as any;
+
+    if (!conversation) {
+      conversation = (await prisma.conversation.create({
+        data: {
+          userId,
+          repoId,
+          title: 'Repository RAG Chat'
+        },
+        include: {
+          messages: true
+        }
+      })) as any;
+    }
+
+    const messagesList: any[] = conversation.messages || [];
+    const formattedMessages = messagesList.map((msg: any) => ({
+      id: msg.id,
+      sender: msg.role === MessageRole.USER ? 'user' : 'ai',
+      role: msg.role,
+      text: msg.content,
+      citations: msg.citations || [],
+      createdAt: msg.createdAt
+    }));
+
+    res.status(200).json({
+      conversationId: conversation.id,
+      messages: formattedMessages
+    });
+  } catch (error: any) {
+    console.error('[Chat Messages Fetch Error]:', error.message);
+    res.status(500).json({ error: 'Failed to fetch conversation history' });
+  }
+});
 
 /**
  * POST /api/chat/query
  * Non-streaming RAG retrieval endpoint for inspecting retrieved code chunks.
  */
-chatRouter.post('/query', async (req: Request, res: Response): Promise<void> => {
+chatRouter.post('/query', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { repoId, query } = req.body as ChatRequest;
 
@@ -39,7 +85,6 @@ chatRouter.post('/query', async (req: Request, res: Response): Promise<void> => 
 
     const queryVector = await generateEmbedding(query);
 
-    // Support both Qdrant JS SDK v1.x (.search) and v2.x (.query) method signatures
     let searchResults: any;
     if (typeof (qdrantClient as any).search === 'function') {
       searchResults = await (qdrantClient as any).search(COLLECTION_NAME, {
@@ -88,10 +133,11 @@ chatRouter.post('/query', async (req: Request, res: Response): Promise<void> => 
 
 /**
  * POST /api/chat/stream
- * Server-Sent Events (SSE) RAG streaming endpoint powered by Groq LLM.
+ * Server-Sent Events (SSE) RAG streaming endpoint with persistent database memory.
  */
-chatRouter.post('/stream', async (req: Request, res: Response): Promise<void> => {
-  const { repoId, query, messages = [] } = req.body as ChatRequest;
+chatRouter.post('/stream', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const userId = req.userId!;
+  const { repoId, query } = req.body as ChatRequest;
 
   if (!repoId || !query) {
     res.status(400).json({ error: 'repoId and query are required' });
@@ -104,6 +150,33 @@ chatRouter.post('/stream', async (req: Request, res: Response): Promise<void> =>
   res.flushHeaders?.();
 
   try {
+    let conversation = await prisma.conversation.findFirst({
+      where: { userId, repoId }
+    });
+
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: {
+          userId,
+          repoId,
+          title: 'Repository RAG Chat'
+        }
+      });
+    }
+
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        role: MessageRole.USER,
+        content: query
+      }
+    });
+
+    const previousDbMessages = await prisma.message.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: 'asc' }
+    });
+
     const queryVector = await generateEmbedding(query);
 
     let searchResults: any;
@@ -138,7 +211,7 @@ chatRouter.post('/stream', async (req: Request, res: Response): Promise<void> =>
         })
       : [];
 
-    // Fallback: If vector similarity search yields 0 hits, retrieve default repo chunks
+    // Fallback: If vector search yields 0 hits, retrieve default top chunks
     if (dbChunks.length === 0) {
       dbChunks = await prisma.chunk.findMany({
         where: { repoId },
@@ -175,16 +248,13 @@ chatRouter.post('/stream', async (req: Request, res: Response): Promise<void> =>
 RETRIEVED CODE CONTEXT:
 ${contextFormatted}`;
 
-    const conversationHistory: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = (messages || [])
-      .map((msg) => {
-        const isUser = msg.sender === 'user' || msg.role === 'user';
-        const textContent = msg.text || msg.content || '';
-        return {
-          role: (isUser ? 'user' : 'assistant') as 'user' | 'assistant',
-          content: textContent
-        };
-      })
-      .filter((m) => typeof m.content === 'string' && m.content.trim().length > 0);
+    // Format previous messages (excluding current query which is appended at end)
+    const conversationHistory: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = previousDbMessages
+      .slice(0, -1)
+      .map((msg) => ({
+        role: msg.role === MessageRole.USER ? ('user' as const) : ('assistant' as const),
+        content: msg.content
+      }));
 
     const completionMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -198,18 +268,48 @@ ${contextFormatted}`;
       stream: true,
     });
 
+    let fullText = '';
+
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content || '';
       if (content) {
+        fullText += content;
         res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
       }
+    }
+
+    if (fullText.trim()) {
+      const citationsList: any[] = [];
+      const regex = /([a-zA-Z0-9_\-\/]+\.[a-zA-Z0-9]+):\s*(\d+)-(\d+)/g;
+      let match;
+      const seen = new Set();
+      while ((match = regex.exec(fullText)) !== null) {
+        const path = match[1];
+        const startLine = parseInt(match[2], 10);
+        const endLine = parseInt(match[3], 10);
+        const key = `${path}:${startLine}-${endLine}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          citationsList.push({ path, startLine, endLine, description: 'Source Citation' });
+        }
+      }
+
+      const citationsPayload = citationsList.length > 0 ? (citationsList as any) : undefined;
+      await prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          role: MessageRole.ASSISTANT,
+          content: fullText,
+          ...(citationsPayload ? { citations: citationsPayload } : {})
+        }
+      });
     }
 
     res.write('data: [DONE]\n\n');
     res.end();
 
   } catch (error: any) {
-    console.error('[Chat Stream API] Error during Groq streaming:', error);
+    console.error('[Chat Stream API Error]:', error);
     const errMsg = error?.status === 429 || error?.message?.includes('429')
       ? 'Rate limit exceeded (429). Please try again in a few moments.'
       : error?.message || 'Internal streaming error';

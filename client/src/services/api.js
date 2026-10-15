@@ -1,4 +1,60 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+export { API_URL };
+
+/**
+ * Fetches current authenticated user profile.
+ * GET /api/auth/me
+ */
+export async function fetchCurrentUser() {
+  const response = await fetch(`${API_URL}/api/auth/me`, {
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    throw new Error(`Unauthenticated (HTTP ${response.status})`);
+  }
+  return await response.json(); // { user: { id, email } }
+}
+
+/**
+ * Logs out current user and clears session cookie.
+ * POST /api/auth/logout
+ */
+export async function logoutUser() {
+  const response = await fetch(`${API_URL}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return await response.json();
+}
+
+/**
+ * Fetches user's GitHub repositories with live indexing status.
+ * GET /api/user/repos
+ */
+export async function fetchUserRepos() {
+  const response = await fetch(`${API_URL}/api/user/repos`, {
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user repositories (HTTP ${response.status})`);
+  }
+  return await response.json();
+}
+
+/**
+ * Fetches persistent message history for a repository conversation.
+ * GET /api/chat/:repoId/messages
+ */
+export async function fetchConversationMessages(repoId) {
+  const response = await fetch(`${API_URL}/api/chat/${repoId}/messages`, {
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch conversation messages (HTTP ${response.status})`);
+  }
+  return await response.json(); // { conversationId, messages }
+}
 
 /**
  * Submits a new repository URL for ingestion.
@@ -16,6 +72,7 @@ export async function createRepository(repoUrl) {
   const response = await fetch(`${API_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({ repoUrl, name })
   });
 
@@ -28,11 +85,13 @@ export async function createRepository(repoUrl) {
 }
 
 /**
- * Fetches all repositories from the backend.
+ * Fetches all public/global repositories from the backend.
  * GET /api/repos
  */
 export async function fetchRepositories() {
-  const response = await fetch(`${API_URL}/api/repos`);
+  const response = await fetch(`${API_URL}/api/repos`, {
+    credentials: 'include'
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch repositories (HTTP ${response.status})`);
   }
@@ -44,7 +103,9 @@ export async function fetchRepositories() {
  * GET /api/repos/:id
  */
 export async function fetchRepoStatus(repoId) {
-  const response = await fetch(`${API_URL}/api/repos/${repoId}`);
+  const response = await fetch(`${API_URL}/api/repos/${repoId}`, {
+    credentials: 'include'
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch repo status (HTTP ${response.status})`);
   }
@@ -60,6 +121,7 @@ export async function streamChatResponse({ repoId, query, messages = [], onToken
     const response = await fetch(`${API_URL}/api/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ repoId, query, messages })
     });
 
