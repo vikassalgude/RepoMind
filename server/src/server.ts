@@ -9,7 +9,7 @@ import { userRouter } from './routes/user';
 import { chatRouter } from './routes/chat';
 import { initializeQdrant } from './config/qdrant';
 import { requireAuth, AuthenticatedRequest } from './middleware/auth';
-
+import './worker';
 dotenv.config();
 
 const app = express();
