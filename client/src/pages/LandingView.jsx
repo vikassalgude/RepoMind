@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Terminal, Sparkles, ArrowRight, Code2, Cpu, Database, ShieldCheck, Zap, Github, LogOut } from 'lucide-react';
+import { Terminal, Sparkles, ArrowRight, Code2, Cpu, Database, ShieldCheck, Zap, Github, LogOut, Linkedin } from 'lucide-react';
 import { API_URL, fetchCurrentUser, logoutUser } from '../services/api';
 
 export function LandingView() {
@@ -181,9 +181,57 @@ export function LandingView() {
         </div>
       </main>
 
-      {/* Simple Footer */}
-      <footer className="py-6 border-t border-[#1e1e1e] text-center text-xs font-['JetBrains_Mono'] text-[#555555]">
-        RepoMind Developer Suite • GitHub OAuth & AST Structural RAG Memory
+      {/* Enhanced Footer with Social Links */}
+      <footer className="border-t border-[#1e1e1e] bg-[#0c0c0c]/80 backdrop-blur py-6 px-6 md:px-10">
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-xs font-['JetBrains_Mono'] text-zinc-400 text-center sm:text-left">
+            <span>
+              Built by{' '}
+              <a
+                href="https://github.com/vikassalgude"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-white hover:underline font-medium"
+              >
+                Vikas Salgude
+              </a>
+            </span>
+            <span className="hidden sm:inline text-zinc-600">•</span>
+            <span className="text-zinc-500">RepoMind Developer Suite</span>
+          </div>
+
+          <div className="flex items-center gap-1 sm:gap-2">
+            <a
+              href="https://github.com/vikassalgude"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub Profile"
+              className="text-zinc-400 hover:text-white transition-all hover:scale-110 p-2 rounded-lg hover:bg-zinc-800/60"
+            >
+              <Github size={18} />
+            </a>
+            <a
+              href="https://www.linkedin.com/in/vikassalgude"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="LinkedIn Profile"
+              className="text-zinc-400 hover:text-white transition-all hover:scale-110 p-2 rounded-lg hover:bg-zinc-800/60"
+            >
+              <Linkedin size={18} />
+            </a>
+            <a
+              href="https://x.com/VIKAS796088"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="X (Twitter) Profile"
+              className="text-zinc-400 hover:text-white transition-all hover:scale-110 p-2 rounded-lg hover:bg-zinc-800/60 flex items-center justify-center"
+            >
+              <svg className="w-[17px] h-[17px] fill-current" viewBox="0 0 24 24">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+            </a>
+          </div>
+        </div>
       </footer>
     </div>
   );
